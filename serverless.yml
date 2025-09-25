@@ -1,0 +1,122 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: felgon
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: foodapi
+
+provider:
+  name: aws
+  region: us-east-1
+  runtime: nodejs22.x
+  architecture: arm64
+  environment:
+    DATABASE_URL: ${env:DATABASE_URL}
+    JWT_SECRET: ${env:JWT_SECRET}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    BUCKET_NAME: !Ref UploadsBucket
+    MEALS_QUEUE_URL: !Ref MealsQueue
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: 
+            - s3:PutObject
+            - s3:GetObject
+            
+          Resource: !Sub '${UploadsBucket.Arn}/*'
+        - Effect: Allow
+          Action: sqs:SendMessage
+          Resource: !GetAtt MealsQueue.Arn
+
+
+
+package:
+  individually: true
+
+plugins:
+  - serverless-offline
+
+build:
+  esbuild:
+    minify: true
+    sourcemap: true 
+
+functions:
+  signin:
+    handler: src/functions/signin.handler
+    events:
+      - httpApi:
+          path: /signin
+          method: POST
+
+
+  signup:
+    handler: src/functions/signup.handler
+    events:
+      - httpApi:
+          path: /signup
+          method: POST
+
+  me:
+    handler: src/functions/me.handler
+    events:
+      - httpApi:
+          path: /me
+          method: GET
+
+  createMeal:
+    handler: src/functions/createMeal.handler
+    events:
+      - httpApi:
+          path: /meals
+          method: POST
+
+  listMeals:
+    handler: src/functions/listMeals.handler
+    events:
+      - httpApi:
+          path: /meals
+          method: GET
+
+  getMealById:
+    handler: src/functions/getMealById.handler
+    events:
+      - httpApi:
+          path: /meals/{mealId}
+          method: GET
+
+  processMeal:
+    handler: src/functions/processMeal.handler
+    timeout: 30
+    events:
+      - sqs:
+          arn: !GetAtt MealsQueue.Arn
+          batchSize: 1
+
+  fileUploadedEvent:
+    handler: src/functions/fileUploadedEvent.handler
+    events:
+     - s3:
+        bucket: !Ref UploadsBucket
+        event: s3:ObjectCreated:*
+        existing: true
+        forceDeploy: true
+
+resources:
+  Resources:
+    UploadsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: foodapiuploadsfelgon
+    MealsDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: Meals-Queue-dlq
+    MealsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: Meals-Queue
+        VisibilityTimeout: 60
+        RedrivePolicy:
+          maxReceiveCount: 1
+          deadLetterTargetArn: !GetAtt MealsDLQ.Arn
+    
